@@ -4,7 +4,12 @@ llm.py
 LLM interface for DeFiLens AI
 Uses Ollama + Custom RAG
 
-Author: DeFiLens AI
+Features
+--------
+- Native Ollama JSON mode
+- Weighted RAG retrieval
+- Robust JSON parsing
+- Automatic citation generation
 """
 
 from __future__ import annotations
@@ -21,6 +26,8 @@ class DeFiRiskAnalyzer:
         self,
         retriever: Retriever,
         model: str = "gemma3:1b"
+        # Recommended:
+        # model: str = "qwen2.5:3b"
     ):
 
         self.retriever = retriever
@@ -35,41 +42,34 @@ class DeFiRiskAnalyzer:
     ) -> str:
 
         return f"""
-You are a Senior Blockchain Security Auditor.
+You are an expert Blockchain Security Auditor.
 
-Your job is to analyze DeFi protocols ONLY using the retrieved documents.
+Answer ONLY using the retrieved context.
 
-IMPORTANT RULES
+STRICT RULES
 
-- Never use outside knowledge.
-- Never hallucinate.
-- If information is unavailable,
-  respond with "Not found in retrieved documents."
-
-Analyze carefully.
+1. Never use outside knowledge.
+2. Never hallucinate.
+3. If information is unavailable, state:
+   "Not found in retrieved documents."
 
 Retrieved Context
+-----------------
 
 {context}
 
----------------------------------------------------------
+----------------------------------------------------
 
 User Question
 
 {question}
 
----------------------------------------------------------
+----------------------------------------------------
 
-Return ONLY valid JSON.
-
-Do NOT write markdown.
-
-Do NOT explain anything outside JSON.
-
-JSON Format
+Return a JSON object with exactly these fields:
 
 {{
-    "risk_level": "",
+    "risk_level": "Low | Medium | High",
     "summary": "",
     "potential_risks": [
         ""
@@ -88,22 +88,38 @@ JSON Format
         top_k: int = 5
     ):
 
-        # Retrieve ranked chunks
+        # -------------------------------
+        # Retrieve evidence
+        # -------------------------------
+
         retrieved = self.retriever.retrieve(
             question,
             top_k
         )
 
-        # Build RAG context
+        # -------------------------------
+        # Build context
+        # -------------------------------
+
         context = self.retriever.build_context(
             question,
             top_k
         )
 
-        # Ask Ollama
+        prompt = self._build_prompt(
+            question,
+            context
+        )
+
+        # -------------------------------
+        # Query Ollama in JSON mode
+        # -------------------------------
+
         response = ollama.chat(
 
             model=self.model,
+
+            format="json",
 
             messages=[
 
@@ -111,10 +127,7 @@ JSON Format
 
                     "role": "user",
 
-                    "content": self._build_prompt(
-                        question,
-                        context
-                    )
+                    "content": prompt
 
                 }
 
@@ -122,14 +135,23 @@ JSON Format
 
         )
 
-        content = response["message"]["content"]
+        content = response["message"]["content"].strip()
 
-        # Parse JSON safely
+        # -------------------------------
+        # Parse JSON
+        # -------------------------------
+
         try:
 
             parsed = json.loads(content)
 
-        except Exception:
+        except Exception as e:
+
+            print("\n========== JSON ERROR ==========")
+            print(e)
+            print("\nRaw model output:\n")
+            print(content)
+            print("================================\n")
 
             parsed = {
 
@@ -143,12 +165,20 @@ JSON Format
 
             }
 
-        # ---------------------------------------------------------
-        # Add REAL citations from Retriever
-        # ---------------------------------------------------------
+        # -------------------------------
+        # Ensure required keys exist
+        # -------------------------------
+
+        parsed.setdefault("risk_level", "Unknown")
+        parsed.setdefault("summary", "")
+        parsed.setdefault("potential_risks", [])
+        parsed.setdefault("mitigations", [])
+
+        # -------------------------------
+        # Build citations
+        # -------------------------------
 
         sources = []
-
         seen = set()
 
         for item in retrieved:
@@ -158,15 +188,14 @@ JSON Format
             if source not in seen:
 
                 seen.add(source)
-
                 sources.append(source)
 
+        # -------------------------------
+        # Add metadata
+        # -------------------------------
+
         parsed["sources"] = sources
-
-        # ---------------------------------------------------------
-
         parsed["retrieved_documents"] = retrieved
-
         parsed["context"] = context
 
         return parsed
