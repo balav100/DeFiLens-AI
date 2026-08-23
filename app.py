@@ -1,5 +1,6 @@
 import streamlit as st
 import ollama
+from collections import defaultdict
 
 from rag.vector_store import VectorStore
 from rag.embeddings import EmbeddingEngine
@@ -8,20 +9,36 @@ from rag.llm import DeFiRiskAnalyzer
 
 
 def get_available_models():
+
     try:
         list_resp = ollama.list()
-        if hasattr(list_resp, 'models'):
+
+        if hasattr(list_resp, "models"):
             models = [m.model for m in list_resp.models]
-        elif isinstance(list_resp, dict) and 'models' in list_resp:
-            models = [m.get('model', m.get('name')) for m in list_resp['models']]
+
+        elif isinstance(list_resp, dict):
+            models = [
+                m.get("model", m.get("name"))
+                for m in list_resp["models"]
+            ]
+
         else:
             models = []
+
     except Exception:
         models = []
 
     if not models:
-        models = ["gemma3:1b", "llama3:latest", "mistral:latest", "phi:latest", "llama3.1:8b"]
+        models = [
+            "gemma3:1b",
+            "llama3:latest",
+            "mistral:latest",
+            "phi:latest",
+            "llama3.1:8b"
+        ]
+
     return models
+
 
 # --------------------------------------------------
 
@@ -32,6 +49,7 @@ st.set_page_config(
 )
 
 # --------------------------------------------------
+
 
 @st.cache_resource
 def load_pipeline():
@@ -51,7 +69,6 @@ def load_pipeline():
 
     return assistant
 
-# --------------------------------------------------
 
 assistant = load_pipeline()
 
@@ -66,39 +83,36 @@ st.caption(
 st.divider()
 
 question = st.text_input(
-
     "Ask anything about a DeFi protocol",
-
     placeholder="Example: Is Aave secure?"
-
 )
 
+# --------------------------------------------------
+
 with st.sidebar:
+
     st.header("⚙️ Configuration")
 
     models = get_available_models()
 
     default_idx = 0
+
     if "gemma3:1b" in models:
         default_idx = models.index("gemma3:1b")
-    elif "llama3:latest" in models:
-        default_idx = models.index("llama3:latest")
 
     selected_model = st.selectbox(
         "Ollama Model",
-        options=models,
-        index=default_idx,
-        help="Select the local Ollama model to use for analysis."
+        models,
+        index=default_idx
     )
 
     st.caption(f"Active model: `{selected_model}`")
 
     top_k = st.slider(
         "Number of Retrieved Chunks",
-        min_value=3,
-        max_value=10,
-        value=5,
-        help="Number of document chunks to retrieve for context."
+        3,
+        10,
+        5
     )
 
 # --------------------------------------------------
@@ -106,14 +120,13 @@ with st.sidebar:
 if st.button("Analyze Risk", use_container_width=True):
 
     if not question.strip():
-
         st.warning("Please enter a question.")
-
         st.stop()
 
     with st.spinner("Analyzing..."):
 
         assistant.model = selected_model
+
         result = assistant.ask(
             question,
             top_k
@@ -123,26 +136,24 @@ if st.button("Analyze Risk", use_container_width=True):
 
     st.divider()
 
-    # --------------------------------------------------
-
     risk = result["risk_level"].lower()
 
     if risk == "low":
-
         st.success(f"Risk Level : {result['risk_level']}")
 
     elif risk == "medium":
-
         st.warning(f"Risk Level : {result['risk_level']}")
 
     elif risk == "high":
-
         st.error(f"Risk Level : {result['risk_level']}")
 
     else:
-
         st.info(f"Risk Level : {result['risk_level']}")
 
+    st.divider()
+
+    # --------------------------------------------------
+    # Summary + Mitigations
     # --------------------------------------------------
 
     col1, col2 = st.columns(2)
@@ -161,7 +172,15 @@ if st.button("Analyze Risk", use_container_width=True):
 
             for item in result["mitigations"]:
 
-                st.markdown(f"- {item}")
+                if isinstance(item, dict):
+
+                    st.markdown(
+                        f"- **{item['type']}** ({item['priority']} Priority)"
+                    )
+
+                else:
+
+                    st.markdown(f"- {item}")
 
         else:
 
@@ -169,12 +188,15 @@ if st.button("Analyze Risk", use_container_width=True):
 
     st.divider()
 
+    # --------------------------------------------------
+    # Potential Risks
+    # --------------------------------------------------
+
     st.subheader("Potential Risks")
 
     if result["potential_risks"]:
 
         for item in result["potential_risks"]:
-
             st.markdown(f"- {item}")
 
     else:
@@ -183,21 +205,35 @@ if st.button("Analyze Risk", use_container_width=True):
 
     st.divider()
 
+    # --------------------------------------------------
+    # Referenced Documents
+    # --------------------------------------------------
+
     st.subheader("Referenced Documents")
 
-    if result["sources"]:
+    grouped = defaultdict(list)
 
-        for source in result["sources"]:
+    for source in result["sources"]:
 
-            st.markdown(f"- {source}")
+        file, page = source.split(" (Page ")
+
+        grouped[file].append(page[:-1])
+
+    for file, pages in grouped.items():
+
+        st.markdown(
+            f"- **{file}** — Pages {', '.join(pages)}"
+        )
 
     st.divider()
 
+    # --------------------------------------------------
+    # Retrieved Chunks
+    # --------------------------------------------------
+
     with st.expander("Retrieved Chunks"):
 
-        docs = result["retrieved_documents"]
-
-        for doc in docs:
+        for doc in result["retrieved_documents"]:
 
             st.markdown("---")
 
@@ -218,13 +254,16 @@ if st.button("Analyze Risk", use_container_width=True):
                 doc["final_score"]
             )
 
-            st.write(f"**Type:** {doc['document_type']}")
-
+            st.write(f"**Rank:** {doc['rank']}")
+            st.write(f"**Type:** {doc['document_type'].title()}")
             st.write(f"**File:** {doc['file']}")
-
             st.write(f"**Page:** {doc['page']}")
 
             st.write(doc["text"])
+
+    # --------------------------------------------------
+    # Retrieved Context
+    # --------------------------------------------------
 
     with st.expander("Retrieved Context"):
 
