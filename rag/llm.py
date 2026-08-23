@@ -2,14 +2,7 @@
 llm.py
 
 LLM interface for DeFiLens AI
-Uses Ollama + Custom RAG
-
-Features
---------
-- Native Ollama JSON mode
-- Weighted RAG retrieval
-- Robust JSON parsing
-- Automatic citation generation
+Uses Ollama + Hybrid RAG
 """
 
 from __future__ import annotations
@@ -26,10 +19,7 @@ class DeFiRiskAnalyzer:
         self,
         retriever: Retriever,
         model: str = "gemma3:1b"
-        # Recommended:
-        # model: str = "qwen2.5:3b"
     ):
-
         self.retriever = retriever
         self.model = model
 
@@ -44,40 +34,58 @@ class DeFiRiskAnalyzer:
         return f"""
 You are an expert Blockchain Security Auditor.
 
-Answer ONLY using the retrieved context.
+Use ONLY the retrieved context.
+Never use outside knowledge.
+Never hallucinate.
 
-STRICT RULES
+If information is unavailable, say:
+"Not found in retrieved documents."
 
-1. Never use outside knowledge.
-2. Never hallucinate.
-3. If information is unavailable, state:
-   "Not found in retrieved documents."
-
-Retrieved Context
------------------
+========================
+RETRIEVED CONTEXT
+========================
 
 {context}
 
-----------------------------------------------------
-
-User Question
+========================
+USER QUESTION
+========================
 
 {question}
 
-----------------------------------------------------
+========================
+OUTPUT FORMAT
+========================
 
-Return a JSON object with exactly these fields:
+Return ONLY valid JSON.
 
 {{
-    "risk_level": "Low | Medium | High",
-    "summary": "",
-    "potential_risks": [
-        ""
-    ],
-    "mitigations": [
-        ""
-    ]
+  "risk_level": "Low|Medium|High",
+
+  "summary": "A concise 3-5 sentence executive summary.",
+
+  "potential_risks": [
+    "Risk 1",
+    "Risk 2"
+  ],
+
+  "mitigations": [
+    {{
+      "type": "Testing",
+      "priority": "High"
+    }},
+    {{
+      "type": "Simulation",
+      "priority": "Medium"
+    }}
+  ]
 }}
+
+Rules:
+- If risk_level is Medium or High, include at least 2 potential_risks.
+- mitigations MUST be an array of objects.
+- Do not output markdown.
+- Do not output explanations outside JSON.
 """
 
     # -------------------------------------------------------------
@@ -88,18 +96,10 @@ Return a JSON object with exactly these fields:
         top_k: int = 5
     ):
 
-        # -------------------------------
-        # Retrieve evidence
-        # -------------------------------
-
         retrieved = self.retriever.retrieve(
             question,
             top_k
         )
-
-        # -------------------------------
-        # Build context
-        # -------------------------------
 
         context = self.retriever.build_context(
             question,
@@ -111,88 +111,44 @@ Return a JSON object with exactly these fields:
             context
         )
 
-        # -------------------------------
-        # Query Ollama in JSON mode
-        # -------------------------------
-
         response = ollama.chat(
-
             model=self.model,
-
             format="json",
-
             messages=[
-
                 {
-
                     "role": "user",
-
                     "content": prompt
-
                 }
-
             ]
-
         )
 
         content = response["message"]["content"].strip()
 
-        # -------------------------------
-        # Parse JSON
-        # -------------------------------
-
         try:
-
             parsed = json.loads(content)
 
-        except Exception as e:
-
-            print("\n========== JSON ERROR ==========")
-            print(e)
-            print("\nRaw model output:\n")
-            print(content)
-            print("================================\n")
-
+        except Exception:
             parsed = {
-
                 "risk_level": "Unknown",
-
                 "summary": content,
-
                 "potential_risks": [],
-
                 "mitigations": []
-
             }
-
-        # -------------------------------
-        # Ensure required keys exist
-        # -------------------------------
 
         parsed.setdefault("risk_level", "Unknown")
         parsed.setdefault("summary", "")
         parsed.setdefault("potential_risks", [])
         parsed.setdefault("mitigations", [])
 
-        # -------------------------------
-        # Build citations
-        # -------------------------------
-
         sources = []
         seen = set()
 
         for item in retrieved:
-
             source = f"{item['file']} (Page {item['page']})"
 
             if source not in seen:
-
                 seen.add(source)
                 sources.append(source)
-
-        # -------------------------------
-        # Add metadata
-        # -------------------------------
 
         parsed["sources"] = sources
         parsed["retrieved_documents"] = retrieved
