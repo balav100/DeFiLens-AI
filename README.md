@@ -11,7 +11,6 @@ Analyze DeFi protocol risks using AI, semantic retrieval, and blockchain securit
 ![FAISS](https://img.shields.io/badge/FAISS-VectorDB-green?style=for-the-badge)
 ![Ollama](https://img.shields.io/badge/Ollama-LLM-black?style=for-the-badge)
 ![Sentence Transformers](https://img.shields.io/badge/SentenceTransformers-Embeddings-orange?style=for-the-badge)
-![License](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)
 
 </div>
 
@@ -605,25 +604,6 @@ JSON Response
 
 Streamlit Dashboard
 ```
-
----
-
-# 📊 Weighted Retrieval
-
-Traditional RAG retrieves documents based only on semantic similarity.
-
-DeFiLens AI additionally considers document reliability.
-
-Example
-
-| Document | Similarity | Trust Weight | Final Score |
-|----------|-----------:|-------------:|------------:|
-| Audit Report | 0.91 | +0.30 | **1.21** |
-| Exploit Report | 0.89 | +0.20 | **1.09** |
-| Whitepaper | 0.93 | +0.10 | **1.03** |
-| General Documentation | 0.95 | +0.00 | **0.95** |
-
-This ensures trusted documents appear before less authoritative sources.
 
 ---
 
